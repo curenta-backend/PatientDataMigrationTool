@@ -78,6 +78,9 @@ namespace PatientDataMigrationTool
                         var prepareNewPatientResult = await PrepareNewPatientAsync(patient, patientMedications);
                         if (prepareNewPatientResult.IsFailure)
                         {
+                            //if (prepareNewPatientResult.Error.Contains("Patient Must Have At Least One Address"))
+                            //    continue;
+
                             await Console.Out.WriteLineAsync($"-{numOfPatientsProcessed}- Patient id : {patient.PatientId}, Error during prepare new patient object : {prepareNewPatientResult.Error}");
                             //throw new Exception(prepareNewPatientResult.Error);
                             numOfFailedPatients++;
@@ -155,10 +158,10 @@ namespace PatientDataMigrationTool
                     var newAddressCreateResult = Domain.Entities.Address.Create(
                         address.Address,
                         address.Address,
-                        address.Street,
-                        address.City,
-                        address.State,
-                        address.ZipCode,
+                        !string.IsNullOrWhiteSpace(address.Street) ? address.Street : "-",
+                        !string.IsNullOrWhiteSpace(address.City) ? address.City : "-",
+                        !string.IsNullOrWhiteSpace(address.State) ? address.State : "CA",
+                        !string.IsNullOrWhiteSpace(address.ZipCode) ? address.ZipCode : "-",
                         addressType,
                         address.Lng,
                         address.Lat,
@@ -175,10 +178,10 @@ namespace PatientDataMigrationTool
                 }
 
                 var patientStatus = new Domain.Entities.PatientStatus();
-                if (string.IsNullOrWhiteSpace(patient.PatientStatus.Trim()))
+                if (string.IsNullOrWhiteSpace(patient.PatientStatus))
                     patientStatus = PatientStatus.InActive;
                 else
-                    Enum.TryParse(patient.PatientStatus, out patientStatus);
+                    Enum.TryParse(patient.PatientStatus.Trim(), out patientStatus);
 
                 long? newPatientFacilityId = null;
 
@@ -298,8 +301,8 @@ namespace PatientDataMigrationTool
                             throw new Exception(medicalInfoResult.Error);
 
                         var rxInfoResult = PatientMedicationRXInfo.Create(
-                                medication.Directions,
-                                medication.Frequency,
+                                (!string.IsNullOrEmpty( medication.Directions) ? medication.Directions : (!string.IsNullOrEmpty(medication.Frequency) ? medication.Frequency : " " )),
+                                (!string.IsNullOrEmpty(medication.Frequency) ? medication.Frequency : " "),
                                 null,
                                 medication.Route,
                                 medication.Quantity,
@@ -339,7 +342,13 @@ namespace PatientDataMigrationTool
 
                         if (medication.PatientMedicationStatusId == (int)EPatientMedicationStatus.OnHold)
                         {
-                            var changeStatusResult = newMediation.ChangeStatusForMigration(Domain.Enums.EnumsCollection.EPatientMedicationStatus.OnHold, medication.DiscontinuationReason, newPatient);
+                            var changeStatusResult = newMediation.ChangeStatusForMigration(Domain.Enums.EnumsCollection.EPatientMedicationStatus.OnHold, !string.IsNullOrEmpty( medication.DiscontinuationReason) ? medication.DiscontinuationReason : " ", newPatient);
+                            if (changeStatusResult.IsFailure)
+                                throw new Exception(changeStatusResult.Error);
+                        }
+                        if (medication.PatientMedicationStatusId == (int)EPatientMedicationStatus.Discontinued)
+                        {
+                            var changeStatusResult = newMediation.ChangeStatusForMigration(Domain.Enums.EnumsCollection.EPatientMedicationStatus.Discontinued, !string.IsNullOrEmpty(medication.DiscontinuationReason) ? medication.DiscontinuationReason : " ", newPatient);
                             if (changeStatusResult.IsFailure)
                                 throw new Exception(changeStatusResult.Error);
                         }
