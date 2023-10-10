@@ -29,6 +29,7 @@ namespace PatientDataMigrationTool
                 if (PageSize.HasValue && PageNumber.HasValue)
                     requesturl = $"{requesturl}?PageSize={PageSize}&PageNumber={PageNumber}";
                 using var client = _httpClientFactory.CreateClient();
+                client.Timeout = TimeSpan.FromSeconds(300);
                 var response = await client.GetAsync(requesturl);
 
                 if (response.IsSuccessStatusCode)
