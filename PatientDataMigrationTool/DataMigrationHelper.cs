@@ -47,8 +47,8 @@ namespace PatientDataMigrationTool
                 }
 
                 int numOfMigratedPatients = 0;
-                int numOfFailedPatients = 0;
                 int numOfPatientsProcessed= 0;
+                var failures = new List<KeyValuePair<string, long>>();
 
                 while (true)
                 {
@@ -78,25 +78,25 @@ namespace PatientDataMigrationTool
                         var prepareNewPatientResult = await PrepareNewPatientAsync(patient, patientMedications);
                         if (prepareNewPatientResult.IsFailure)
                         {
+                            failures.Add(new KeyValuePair<string, long>( prepareNewPatientResult.Error, patient.PatientId));
+
                             //if (prepareNewPatientResult.Error.Contains("Patient Must Have At Least One Address"))
                             //    continue;
 
-                            await Console.Out.WriteLineAsync($"-{numOfPatientsProcessed}- Patient id : {patient.PatientId}, Error during prepare new patient object : {prepareNewPatientResult.Error}");
-                            //throw new Exception(prepareNewPatientResult.Error);
-                            numOfFailedPatients++;
+                            //await Console.Out.WriteLineAsync($"-{numOfPatientsProcessed}- Patient id : {patient.PatientId}, Error during prepare new patient object : {prepareNewPatientResult.Error}");
+
                             continue;
                         }
 
                         var saveNewPatientResult = await SaveNewPatientAsync(prepareNewPatientResult.Value);
                         if (saveNewPatientResult.IsFailure)
                         {
-                            await Console.Out.WriteLineAsync($"-{numOfPatientsProcessed}- Patient id : {patient.PatientId}, Error saving patient: " + saveNewPatientResult.Error);
-                            numOfFailedPatients++;
-                            //throw new Exception(saveNewPatientResult.Error);
+                            failures.Add(new KeyValuePair<string, long>(saveNewPatientResult.Error, patient.PatientId));
+
+                            //await Console.Out.WriteLineAsync($"-{numOfPatientsProcessed}- Patient id : {patient.PatientId}, Error saving patient: " + saveNewPatientResult.Error);
                         }
                         else
                         {
-                            await Console.Out.WriteLineAsync($"-{numOfPatientsProcessed}- Patient id : {patient.PatientId} migrated successfilly");
                             numOfMigratedPatients++;
                         }
                     }
@@ -104,8 +104,11 @@ namespace PatientDataMigrationTool
                     pageNumber++; // Move to the next page
                 }
 
-                await Console.Out.WriteLineAsync($"** {numOfPatientsProcessed} patients processed : {numOfMigratedPatients} patients migrated successfully, {numOfFailedPatients} patients failed **");
+                await Console.Out.WriteLineAsync($"** {numOfPatientsProcessed} patients processed : {numOfMigratedPatients} patients migrated successfully, {failures.Count} patients failed with the following reasons **");
 
+                var failureReasons = failures.GroupBy(x => x.Key).Select(x => new { Reason = x.Key, Count = x.Count(), PatientIds = string.Join(",", x.Select(r => r.Value.ToString())) }).ToList();
+                foreach (var failureReason in failureReasons)
+                    await Console.Out.WriteLineAsync($"Reason : {failureReason.Reason}, Count : {failureReason.Count}, PatientIds : {failureReason.PatientIds}");
             }
             catch (Exception e)
             {
@@ -249,6 +252,8 @@ namespace PatientDataMigrationTool
                     newPatient.SetDeliveryNote(" ");
                 if (!string.IsNullOrEmpty(patient.Comments))
                     newPatient.SetComment(patient.Comments);
+                else
+                    newPatient.SetComment(" ");
                 if (!string.IsNullOrEmpty(patient.ProfilePicPath))
                     newPatient.UpdateProfilePic(patient.ProfilePicPath);
 
