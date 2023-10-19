@@ -124,8 +124,17 @@ namespace PatientDataMigrationTool
                 Domain.Entities.Patient newPatient;
 
                 //patient basic data with addresses and place of service
-                var gender = new Domain.Entities.Gender();
-                Enum.TryParse(patient.Gender, out gender);
+                var gender = Gender.Unknown;
+                if (!string.IsNullOrWhiteSpace(patient.Gender))                    
+                {
+                    try
+                    {
+                        gender = (Gender)Enum.Parse(typeof(Gender), patient.Gender);
+                    }
+                    catch (Exception)
+                    {
+                    }
+                }
 
                 var basicInfoResult = Domain.Entities.PatientBasicInfo.Create(
                     patient.Fname,
@@ -165,6 +174,7 @@ namespace PatientDataMigrationTool
                         !string.IsNullOrWhiteSpace(address.City) ? address.City : "-",
                         !string.IsNullOrWhiteSpace(address.State) ? address.State : "CA",
                         !string.IsNullOrWhiteSpace(address.ZipCode) ? address.ZipCode : "-",
+                        null,
                         addressType,
                         address.Lng,
                         address.Lat,
@@ -260,7 +270,7 @@ namespace PatientDataMigrationTool
                 //files
                 foreach (var file in patient.PatientFiles)
                 {
-                    var createDocumentResult = Domain.ValueObjects.Document.Create(file.AzureFilePath);
+                    var createDocumentResult = Domain.ValueObjects.Document.Create(file.FileName, file.AzureFilePath);
                     if (createDocumentResult.IsFailure)
                         throw new Exception(createDocumentResult.Error);
                     newPatient.AddDocument(createDocumentResult.Value);
