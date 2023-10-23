@@ -20,12 +20,17 @@ namespace PatientDataMigrationTool
         private IFacilityClient _facilityClient;
         private IOldPatientClient _oldPatientClient;
         private readonly ICheckPatientExistService _checkPatientExistService;
+        private readonly Dictionary<long, Guid> patientMedicationIdsMapping;
+        private readonly Dictionary<long, Guid> adminHoursIdsMapping;
+
         public DataMigrationHelper(ApplicationDbContext newPatientDbContext, Domain.Interfaces.ExternalClients.IFacilityClient facilityClient, IOldPatientClient oldPatientClient, Domain.Abstractions.ICheckPatientExistService checkPatientExistService)
         {
             _newPatientDbContext = newPatientDbContext;
             _facilityClient = facilityClient;
             _oldPatientClient = oldPatientClient;
             _checkPatientExistService = checkPatientExistService;
+            patientMedicationIdsMapping = new Dictionary<long, Guid>();
+            adminHoursIdsMapping = new Dictionary<long, Guid>();
         }
 
         internal async Task MigrateAsync()
@@ -109,6 +114,16 @@ namespace PatientDataMigrationTool
                 var failureReasons = failures.GroupBy(x => x.Key).Select(x => new { Reason = x.Key, Count = x.Count(), PatientIds = string.Join(",", x.Select(r => r.Value.ToString())) }).ToList();
                 foreach (var failureReason in failureReasons)
                     await Console.Out.WriteLineAsync($"Reason : {failureReason.Reason}, Count : {failureReason.Count}, PatientIds : {failureReason.PatientIds}");
+
+                //print patient medication ids mapping
+                await Console.Out.WriteLineAsync($"** Patient Medication Ids Mapping **");
+                foreach (var patientMedicationIdMapping in patientMedicationIdsMapping)
+                    await Console.Out.WriteLineAsync($"{patientMedicationIdMapping.Key},{patientMedicationIdMapping.Value}");
+
+                //print admin hours ids mapping
+                await Console.Out.WriteLineAsync($"** Admin Hours Ids Mapping **");
+                foreach (var adminHoursIdMapping in adminHoursIdsMapping)
+                    await Console.Out.WriteLineAsync($"{adminHoursIdMapping.Key},{adminHoursIdMapping.Value}");
             }
             catch (Exception e)
             {
@@ -343,10 +358,14 @@ namespace PatientDataMigrationTool
                         {
                             var parsedHour = TimeOnly.ParseExact(adminHour.Hour, "hh:mm tt", CultureInfo.InvariantCulture);
 
+                            var newAdminHourGUID = Guid.NewGuid();
                             newAdminHours.Add(new Domain.Entities.PatientMedicationAdminHour()
                             {
+                                Id = newAdminHourGUID,
                                 Hour = parsedHour
                             });
+
+                            adminHoursIdsMapping.Add(adminHour.PatientMedicationAdminHourId, newAdminHourGUID);
                         }
 
                         var newMedicationResult = await Domain.Entities.PatientMedication.Create(newPatientFacilityId, medication.OrderNumber, medicalInfoResult.Value, rxInfoResult.Value, newAdminHours, newPatient, null);
@@ -373,6 +392,8 @@ namespace PatientDataMigrationTool
                             newMediation.SetCreatedDate(medication.CreateDate.Value);
                         if (medication.UpdateDate != null)
                             newMediation.SetUpdatedDate(medication.UpdateDate.Value);
+
+                        patientMedicationIdsMapping.Add(medication.PatientMedicationId, newMediation.Id);
 
                         var addMedicationResult = await newPatient.AddMedicationForMigration(newMediation, newPatientFacilityId, _facilityClient);
                     }
