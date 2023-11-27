@@ -1,4 +1,5 @@
-﻿using CSharpFunctionalExtensions;
+﻿using Azure.Core;
+using CSharpFunctionalExtensions;
 using Domain.Abstractions;
 using Domain.Entities;
 using Domain.Interfaces.ExternalClients;
@@ -6,6 +7,7 @@ using Domain.ValueObjects;
 using Infrastructure.DB;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using System.Globalization;
 using System.Linq;
 using System.Text;
@@ -368,7 +370,19 @@ namespace PatientDataMigrationTool
                             adminHoursIdsMapping.Add(adminHour.PatientMedicationAdminHourId, newAdminHourGUID);
                         }
 
-                        var newMedicationResult = await Domain.Entities.PatientMedication.Create(newPatientFacilityId, medication.OrderNumber, medicalInfoResult.Value, rxInfoResult.Value, newAdminHours, newPatient, null);
+                        //payer
+                        var billingType = (Domain.Enums.EnumsCollection.EMedicationBillingType?)null;
+                        try
+                        {
+                            if (!string.IsNullOrWhiteSpace(medication.Payer))
+                                if (Enum.IsDefined(typeof(Domain.Enums.EnumsCollection.EMedicationBillingType), medication.Payer))
+                                    billingType = (Domain.Enums.EnumsCollection.EMedicationBillingType)Enum.Parse(typeof(Domain.Enums.EnumsCollection.EMedicationBillingType), medication.Payer);
+                        }
+                        catch 
+                        {
+                        }
+
+                        var newMedicationResult = await Domain.Entities.PatientMedication.Create(newPatientFacilityId, medication.OrderNumber, medicalInfoResult.Value, rxInfoResult.Value, billingType, newAdminHours, newPatient, null);
                         if (newMedicationResult.IsFailure)
                             throw new Exception(newMedicationResult.Error);
 
@@ -433,6 +447,32 @@ namespace PatientDataMigrationTool
             catch (Exception ex)
             {
                 return Result.Failure(ex.Message + " - " + ex.InnerException?.Message);
+            }
+        }
+
+        public async Task MigrateAllergiesAsync()
+        {
+            try
+            {
+                var allergiesListToAdd = new List<string>() { "Duratuss ac, Lactose intolerance (gi), and Tramadol", "Elavil", "Bimatoprost", "Ciprofloxacin", "Iodine containing compounds ", "Sulfa, Tetracycline ", "Acarbose", "ACE Inhibitors", "Acetaminophen ", "Acetominophen", "Acyclovir", "adhesive tape", "Alcohol", "Almond oil", "ALOE VERA", "Alprazolam", "Altace", "Ambien", "amitiptyline", "amitriptyline", "AMLODIPINE", "Amlodipine besylate", "amoxcillin", "Amoxicillin", "ampicillin", "Ancef", "Antibiotics (sulfa drugs), Aspirin (NSAIDs), Ibuprofen, Naprosyn", "antivert", "Aricept", "ASA", "aspirin", "Aspirin (NSAIDs)", "Aspirin 81mg", "Aspirin-oxycodone", "atenolol", "Ativan", "Atorvastatin", "Atorvastatin calcium", "Atrovastatin", "augmentin", "Avocado", "Azythromyicn", "Bacitracin", "Baclofen", "BACTRIM", "Balsam of Peru", "Banana", "Barbiturates", "Bee pollen ", "Bee sting", "Bee venom", "Beef", "Beer", "BENADRYL", "Benzathine 600.000unit/ml IM", "Benzoyl Peroxide", "BETA-BLOCKERS", "Black beans", "BLEACH", "Brocoli", "Bupropion", "Buspar", "Byetta", "Caffeine", "Carbamazepine", "Cardura", "Carisoprodol", "Carrot", "Carvedilol", "cashews, pine nuts, pistachios", "Cats", "Ceclor", "Cefalexin", "Cefazolin", "celecobix", "Celecoxib", "Celery", "cephalexin", "CEPHALOSPORINS", "cheese", "Chicken", "Chilli", "Chlorhexidine", "Chlorthalidone", "Chocolate", "Chromium", "Cigarette smoke", "Cipro", "ciproflax", "Ciprofloxacin", "Ciprofloxacin, Penicillin", "Citalopram", "Claritin", "Cleaning products", "Clindamycin ", "Clonidine", "Cobalt", "Cockroaches", "Codeine", "Codeine Phosphate", "Codeine sulfate", "Codeine, Lisinopril, Amlodipine, Benazepril, Acetaminophen", "CODIENE", "Cogentin", "Compazine", "Contrast Dye", "contrast dye , iodine", "Corn", "Cortisone", "cortisone (unknown reaction)", "Cosmetics", "COVID 19 Vaccine MODERNA", "COX-2 inhibitor ", "cozaar", "Cuvar Inhaler ", "cyclosporins", "Cymbalta", "Darvocet", "Demerol", "Depakote", "diazepam", "DICLOFENAC ", "Dilantin", "DILANTIN [PHENYTOIN]", "Dilaudid", "Dimethylaminopropylamine (DMAPA)", "Diovan", "Diphendyramine", "Diuretics", "Dogs", "Donepezil", "doxylamine", "dramamine", "Droperidol", "Dulaglutide", "duloxetine", "Dust mites", "DYE", "Ear drops", "ECOTRIN", "Egg", "Egg white", "Enalapril Maleate", "Environmental allergies", "Environmental allergy", "Epinephrine", "Erthromycin", "Erythomycin, Morphine, Penicillin (Swelling), Sulfadiazine", "Erythromycin", "ERYTHROMYCIN BASE", "FELODIPINE", "fenobrate", "Fentanyl", "Ferrous Sulfate", "figs", "Fish", "Fish-Products", "fishproduct", "FLAGYL", "Flexeril", "Flomax", "Food dye", "Formaldehyde", "fosamax", "Fosaprepitant", "Fosinopril", "Fruit juices with dyes", "Fungicide", "Gabapentin", "Gabapentin, Dorzolamide, NSAIDS, Ceftriaxone", "Garlic", "Gelatin", "gemfibrozil", "Glipizide", "Gluten", "Glyceryl monothioglycolate", "Gold", "Grapes", "Grass", "Hair dye", "HALDOL", "Haloperidol ", "Hay Fever", "HCTZ", "HEPARIN", "HYDRALAZINE", "Hydrochlorothiazide", "Hydrocodone", "Ibuprofen", "Imuran", "Inaspine", "indomethcin", "Influenza virus vaccines", "Insect sting", "interferon", "Intravenous contrast dye", "Iodinated contrast media", "IODINE", "Iodine (Topical)", "Iodine based contrast media", "IODINE-BASED CONTRAST MEDIA", "iodine-basedcontrastmedia", "ipratropium", "IV Contrast", "KEFLEX", "Ketoconazole", "KETOROLAC", "Kiwi", "Lactate", "Lactose", "LACTOSE INTOLERANCE", "lamotrigine", "Lasix", "Latex", "lentils", "Levaquen Leva PAK", "levaquin", "Levofloxacin", "Levonorgestrel-ethynilEstrad", "Lexapro", "Lidocaine", "Limbrel", "LINDANE", "Lipitor", "Lisinopril", "Lithium", "Live Allergy", "Local anesthetics", "Lorazepam ", "LOVAST", "LOVASTATIN", "Lupin", "Macrobid", "MACROLIDES", "Mango", "MEDI-HONEY", "melixocam, prednisone", "Melon", "Meperidine", "Metformin", "Methadone", "Metoclopamide", "metoprolol", "Metoprolol Tartrate, Pravastatin Sodium, Fosamax, Zocor, Bactrim", "Metronidazole", "Midazolam", "Milk", "MIRTAZAPINE", "Mold", "Molluscs", "MOLLUSKS", "MOLLUSKS ( SCALLOPS, CLAMS, OYSTERS )", "morphine", "Morphine(confusion)", "Motrin", "Mucinex", "Mustard", "Nail polish", "naloxone", "NAPROSYN", "Naproxen", "Narco", "Neomycin", "NEOSPORIN", "Neurontin", "niacin", "Nickel", "Nifedipine", "NITROFURAN DERIVATIVES", "Nitrofurantoin", "Nitroglycerin (hypotension)", "NKA", "NKDA", "No Allergies", "No known allergies", "No Known Allergy", "NOKNOWN", "NoKnownAllergies", "Norvasc", "Novocain", "nsaid", "NSAiDS", "Nuts", "NYSTATIN", "Oats", "Ofloxacin", "OLANZEPINE", "OMEPRAZOLE", "omnipaque", "onions", "Opiate Derivatives", "opioid-like analgesics", "Opioids", "Opium", "Oranges", "Oxacarbazepine", "Oxacillin", "Oxcarbazepine", "oxybutin", "oxybutynin", "Oxycodone", "OXYCODONE-ACETAMINOPHEN", "oxymetazoline", "Pantoprazole, Alke-Seltzer antacid, Cheese, Pork, shrimp", "Paradol", "Paraphenylenediamine (PPD)", "PAROXETINE", "PAXIL", "PCN", "PCN, SARS-CoV-2 (COVID-19) mRNA-1273 vaccine", "PCN=SOB", "PCNs", "Peach", "Peanut", "peas", "PENCICLOVIR ", "PENIC", "Peniciilin", "PENICILIN", "penicillin", "Penicillin G ", "Penicillin G Benzathine", "Penicillin Notatum", "Penicillin V potassium", "Penicillins", "penicillins, amoxicillin, demerol, morphine, fentanyl, gabapentin, propoxyphene, dilaudid, hydrocodone ", "Pepper", "PERCOCET", "Percodan", "Perfume", "persimmon fruit", "Pet dander", "PHENobarbital", "Phenylephrine CM", "pine nuts", "Pineapple", "Pioglitazone HCL", "Plum", "Pneumococcal vac polyvalent", "Pollens", "POLYSORBATE", "Pork", "Potassium Chloride", "Poultry meat", "pradaxa", "PRAVASTATIN", "Pravastatin sodium", "Precedex", "Prednisone", "Pregabalin", "PRINIVIL", "prinzide", "Prochlorperazine", "Prolixin", "Propanolol", "Propofol", "Propoxyphene", "Prosac", "Prozac", "psyllium", "Quinine, Tetracycline, Pravachol", "QUINOLONES", "RBCs antibodies ", "Red dye", "Red meat", "reglan", "restasis", "Risedronate sodium", "risperidone", "ROCEPHIN", "Rosuvastatin", "SAIDs", "Salmetrol ", "Scopolamine", "Seafood", "Seasonal", "Seeds", "Semen", "Septra", "Seroquel", "Seroquel(tongueswelling)", "Seroquel/tongue swelling", "Sesame", "Shell Fish", "Shellfish", "Simethicone", "SIMVASTATIN", "Sitagliptin", "Soap/ Shampoo", "SODIUM THIOSULFATE", "sohail.gu11@curenta.com", "solifenacin", "Solumedrol", "Sotalol", "Soy", "Spices", "Squash", "SSRI drugs", "stadol", "statins", "Stelazine", "Steroids", "Strawberries", "Streptomycin", "sudafed", "SULFA", "Sulfa (Sulfonamide antibiotics) ", "Sulfa Antibiotics", "sulfa antibotics", "Sulfa Drugs ", "Sulfa, Ciprofloxacin", "SULFAANTIBIOTICS", "sulfadrugs(unknown)", "Sulfamethoxazole ", "Sulfamethoxazole, Trimethoprim, Morphine Sulfate ", "Sulfamethoxazole-trimethoprim", "Sulfate", "Sulfites", "Sulfur", "sulindoc", "Sumatriptan", "Sun", "tagament", "Tamsulosin", "Tape", "Tartrazine", "TDP vaccine", "Tegretol", "Terazosin", "Test SG Allergy......", "test_ibram", "TETANUS", "Tetracycline ", "Tetracycline Hydrochloride ", "THIO PENTAL", "Thorazine", "Timolol", "Toluidine", "Tomato", "Topiramate", "toradol", "tositumomab", "toxoid", "Tramadol", "Trazodone ", "Trazodone-hydrochloride ", "Tree nuts", "Trees", "Trental", "TRETINOIN", "TRIMETHOPRIN", "Tylenol", "Tylenol #3", "ULORIC", "Vancomycin", "Venlafaxine HCL", "Verapamil", "Vesicare", "Vicodin", "Voltaren", "walnuts", "Warfarin", "Water", "Wellbutrin", "Wheat", "WHEY", "Xanax", "ZITHROMAX", "zofran", "Zoloft", "zolpidem", "Zosyn" };
+
+                foreach (var allergy in allergiesListToAdd)
+                {
+                    var alreadyExist = _newPatientDbContext.Allergies.FirstOrDefault(x => x.AllergyDesc == allergy);
+                    if (alreadyExist != null)
+                        continue;
+
+                    var createAllergiesResult = Domain.Entities.Allergies.Create(allergy);
+                    if (createAllergiesResult.IsFailure)
+                        throw new Exception(createAllergiesResult.Error);
+                    var allergies = createAllergiesResult.Value;
+                    _newPatientDbContext.Allergies.Add(allergies);
+                }
+                await _newPatientDbContext.SaveChangesAsync();
+            }
+            catch (Exception ex)
+            {
+                throw ex;
             }
         }
     }

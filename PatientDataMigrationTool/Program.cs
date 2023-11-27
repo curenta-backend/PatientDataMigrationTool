@@ -47,6 +47,9 @@ internal class Program
                 var checkPatientExistService = serviceProvider.GetRequiredService<ICheckPatientExistService>();
 
                 var patientDataMigration = new DataMigrationHelper(newDbContext, facilityClient, newPatientClient, checkPatientExistService);
+
+                await patientDataMigration.MigrateAllergiesAsync();
+
                 await patientDataMigration.MigrateAsync();
             }
 
