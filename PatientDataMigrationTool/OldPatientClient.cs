@@ -25,7 +25,7 @@ namespace PatientDataMigrationTool
             {
 
 
-                string requesturl = "https://localhost:44344/GetAllPatients";
+                string requesturl = "https://localhost:44344/api/DataMigration/GetAllPatients";
                 if (PageSize.HasValue && PageNumber.HasValue)
                     requesturl = $"{requesturl}?PageSize={PageSize}&PageNumber={PageNumber}";
                 using var client = _httpClientFactory.CreateClient();
