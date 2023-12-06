@@ -65,10 +65,11 @@ namespace PatientDataMigrationTool
                 {
                     await Console.Out.WriteLineAsync($"Getting data of {pageSize} patients");
                     var patientsResult = await _oldPatientClient.GetPatients(pageSize, pageNumber);
-                    if (patientsResult.IsFailure)
+                    int tryCount = 0;
+                    while (tryCount <= 3 && patientsResult.IsFailure)
                     {
-                        Console.WriteLine("Error fetching patients: " + patientsResult.Error);
-                        break; // Exit the loop if there's an error
+                        patientsResult = await _oldPatientClient.GetPatients(pageSize, pageNumber);
+                        tryCount++;
                     }
 
                     if (patientMedicationIdsMapping.Count >= 1000 || (patientMedicationIdsMapping.Any() && patientsResult.IsFailure) ||
@@ -103,55 +104,56 @@ namespace PatientDataMigrationTool
                         var patients = patientsResult.Value.Patients;
                         var medications = patientsResult.Value.PatientMedications;
 
-                    if (patients.Count == 0 )
-                    {
-                        // No more patients to process
-                        break;
+
+                        if (patients.Count == 0)
+                        {
+                            // No more patients to process
+                            break;
+                        }
+
+                        foreach (var patient in patients)
+                        {
+                            numOfPatientsProcessed++;
+
+                            var patientMedications = medications.Where(x => x.PatientIdRef == patient.PatientId).ToList();
+
+                            var prepareNewPatientResult = await PrepareNewPatientAsync(patient, patientMedications);
+                            if (prepareNewPatientResult.IsFailure)
+                            {
+                                failures.Add(new KeyValuePair<string, long>(prepareNewPatientResult.Error, patient.PatientId));
+
+                                //if (prepareNewPatientResult.Error.Contains("Patient Must Have At Least One Address"))
+                                //    continue;
+
+                                //await Console.Out.WriteLineAsync($"-{numOfPatientsProcessed}- Patient id : {patient.PatientId}, Error during prepare new patient object : {prepareNewPatientResult.Error}");
+
+                                continue;
+                            }
+
+                            var saveNewPatientResult = await SaveNewPatientAsync(prepareNewPatientResult.Value);
+                            if (saveNewPatientResult.IsFailure)
+                            {
+                                failures.Add(new KeyValuePair<string, long>(saveNewPatientResult.Error, patient.PatientId));
+
+                                //await Console.Out.WriteLineAsync($"-{numOfPatientsProcessed}- Patient id : {patient.PatientId}, Error saving patient: " + saveNewPatientResult.Error);
+                            }
+                            else
+                            {
+                                numOfMigratedPatients++;
+                            }
+                        }
+
+                        pageNumber++; // Move to the next page
+                        Console.WriteLine("pageNumber " + pageNumber);
                     }
 
-                    foreach (var patient in patients)
-                    {
-                        numOfPatientsProcessed++;
+                    await Console.Out.WriteLineAsync($"** {numOfPatientsProcessed} patients processed : {numOfMigratedPatients} patients migrated successfully, {failures.Count} patients failed with the following reasons **");
 
-                        var patientMedications = medications.Where(x => x.PatientIdRef == patient.PatientId).ToList();
+                    var failureReasons = failures.GroupBy(x => x.Key).Select(x => new { Reason = x.Key, Count = x.Count(), PatientIds = string.Join(",", x.Select(r => r.Value.ToString())) }).ToList();
+                    foreach (var failureReason in failureReasons)
+                        await Console.Out.WriteLineAsync($"Reason : {failureReason.Reason}, Count : {failureReason.Count}, PatientIds : {failureReason.PatientIds}");
 
-                        var prepareNewPatientResult = await PrepareNewPatientAsync(patient, patientMedications);
-                        if (prepareNewPatientResult.IsFailure)
-                        {
-                            failures.Add(new KeyValuePair<string, long>(prepareNewPatientResult.Error, patient.PatientId));
-
-                            //if (prepareNewPatientResult.Error.Contains("Patient Must Have At Least One Address"))
-                            //    continue;
-
-                            //await Console.Out.WriteLineAsync($"-{numOfPatientsProcessed}- Patient id : {patient.PatientId}, Error during prepare new patient object : {prepareNewPatientResult.Error}");
-
-                            continue;
-                        }
-
-                        var saveNewPatientResult = await SaveNewPatientAsync(prepareNewPatientResult.Value);
-                        if (saveNewPatientResult.IsFailure)
-                        {
-                            failures.Add(new KeyValuePair<string, long>(saveNewPatientResult.Error, patient.PatientId));
-
-                            //await Console.Out.WriteLineAsync($"-{numOfPatientsProcessed}- Patient id : {patient.PatientId}, Error saving patient: " + saveNewPatientResult.Error);
-                        }
-                        else
-                        {
-                            numOfMigratedPatients++;
-                        }
-                    }
-
-                    pageNumber++; // Move to the next page
-                    Console.WriteLine("pageNumber " + pageNumber);
                 }
-
-                await Console.Out.WriteLineAsync($"** {numOfPatientsProcessed} patients processed : {numOfMigratedPatients} patients migrated successfully, {failures.Count} patients failed with the following reasons **");
-
-                var failureReasons = failures.GroupBy(x => x.Key).Select(x => new { Reason = x.Key, Count = x.Count(), PatientIds = string.Join(",", x.Select(r => r.Value.ToString())) }).ToList();
-                foreach (var failureReason in failureReasons)
-                    await Console.Out.WriteLineAsync($"Reason : {failureReason.Reason}, Count : {failureReason.Count}, PatientIds : {failureReason.PatientIds}");
-
-
                 int reuredExternalID = 0;
                 int takenPage = 1;
                 while (reuredExternalID > 400 || (takenPage == 1 && reuredExternalID == 0))
@@ -177,43 +179,18 @@ namespace PatientDataMigrationTool
 
         private void GenerateSqlScript(Dictionary<long, Guid> data, string fileName)
         {
-            string directory = ".";
+            string directory = "."; // Current directory. Change as needed.
             string extension = ".txt";
             int fileNumber = 1;
 
-                // Write admin hours ids mapping
-                using (StreamWriter adminHoursIdsMappingWriter = new StreamWriter(adminHoursIdsMappingFilePath, true))
-                {
 
-                    await adminHoursIdsMappingWriter.WriteLineAsync($"** Admin Hours Ids Mapping **");
-                    foreach (var adminHoursIdMapping in adminHoursIdsMapping)
-                    {
-                        await adminHoursIdsMappingWriter.WriteLineAsync($"{adminHoursIdMapping.Key},{adminHoursIdMapping.Value}");
-                    }
-                }
+            string filePath = Path.Combine(directory, fileName + fileNumber + extension);
 
-                string sqlFilePath = path + @"\sqlPatientMigration.sql";
-
-                using (StreamWriter sqlWriter = new StreamWriter(sqlFilePath, false)) // false to overwrite if the file already exists
-                {
-                    createfile(sqlFilePath);
-                    // Start of the transaction
-                    await sqlWriter.WriteLineAsync("BEGIN TRANSACTION;");
-                    await sqlWriter.WriteLineAsync("BEGIN TRY");
-
-                    // Write SQL statement to create the PatientIdsMapping table
-                    await sqlWriter.WriteLineAsync("    CREATE TABLE PatientIdsMapping (");
-                    await sqlWriter.WriteLineAsync("        patientId BIGINT NULL,");
-                    await sqlWriter.WriteLineAsync("        PatientGuid UNIQUEIDENTIFIER NOT NULL");
-                    await sqlWriter.WriteLineAsync("    );");
-                    await sqlWriter.WriteLineAsync("");
-
-                    // Write INSERT statements for each record in patientMedicationIdMapping
-                    await sqlWriter.WriteLineAsync("    -- Insert statements for PatientIdsMapping");
-                    foreach (var mapping in patientMedicationIdsMapping)
-                    {
-                        await sqlWriter.WriteLineAsync($"    INSERT INTO PatientIdsMapping (patientId, PatientGuid) VALUES ({mapping.Key}, '{mapping.Value}');");
-                    }
+            while (File.Exists(filePath))
+            {
+                fileNumber++;
+                filePath = Path.Combine(directory, fileName + fileNumber + extension);
+            }
 
             // Create the file
             try
@@ -221,23 +198,31 @@ namespace PatientDataMigrationTool
                 using (var writer = new StreamWriter(filePath))
                 {
                     Console.WriteLine($"Created file: {filePath}");
-                    string QslSCript = "";
-                    if (filePath == $"{fileName}{1}")
+
+                    string SqlScript = "";
+
+                    if (fileNumber == 1)
                     {
-                        QslSCript = "BEGIN TRANSACTION;\r\n--BEGIN TRY\r\n​\r\n--Create patient mapping temp table and feed it with data\r\nCREATE TABLE PatientIdsMapping (\r\n\tPatientId bigint NULL,\r\n\tPatientGUID uniqueidentifier NULL\r\n);\r\n​\r\nINSERT INTO PatientIdsMapping (PatientId,PatientGUID) VALUES";
+                        SqlScript = "BEGIN TRANSACTION;\r\n--BEGIN TRY\r\n​\r\n--Create patient mapping temp table and feed it with data\r\nCREATE TABLE PatientIdsMapping (\r\n\tPatientId bigint NULL,\r\n\tPatientGUID uniqueidentifier NULL\r\n);\r\n​\r\nINSERT INTO PatientIdsMapping (PatientId,PatientGUID) VALUES";
                     }
                     else
                     {
-                        QslSCript = "INSERT INTO PatientIdsMapping(PatientId, PatientGUID) VALUES";
+                        SqlScript = "INSERT INTO PatientIdsMapping (PatientId,PatientGUID) VALUES";
                     }
-                    writer.WriteLine(QslSCript);
+
+
+                    writer.WriteLine(SqlScript);
 
                     foreach (var item in data)
                     {
                         writer.WriteLine($"('{item.Key}','{item.Value}'),");
                     }
 
-                    writer.WriteLine("COMMIT;"); // Optionally, commit the transaction
+                    if (data.Count == 0)
+                    {
+                        writer.WriteLine("COMMIT;"); // Optionally, commit the transaction
+                    }
+
                 }
 
             }
@@ -279,9 +264,7 @@ namespace PatientDataMigrationTool
                         QslSCript = "INSERT INTO PatientIdsMapping (PatientId,PatientGUID) VALUES";
                     }
 
-                    // Write INSERT statements for each record in adminHoursMapping
-                    await sqlWriter.WriteLineAsync("    -- Insert statements for AdminHourMapping");
-                    foreach (var mapping in adminHoursIdsMapping) // Replace with your actual adminHoursMapping data structure
+                    foreach (var item in data)
                     {
                         writer.WriteLine($"('{item.Value}','{item.Key}'),");
                     }
@@ -307,13 +290,7 @@ namespace PatientDataMigrationTool
                 var gender = Gender.Unknown;
                 if (!string.IsNullOrWhiteSpace(patient.Gender))
                 {
-                    //try
-                    //{
-                    //    gender = (Gender)Enum.Parse(typeof(Gender), patient.Gender);
-                    //}
-                    //catch (Exception)
-                    //{
-                    //}
+
                     try
                     {
                         bool isValidGender = Enum.TryParse<Gender>(patient.Gender, true, out gender);
@@ -335,7 +312,7 @@ namespace PatientDataMigrationTool
                     patient.Lname,
                     patient.Email,
                     patient.Phonenumber,
-                    SafeParseDate(patient.Dob),
+                    (DateOnly)SafeParseDate(patient.Dob),
                     gender
                     );
                 if (basicInfoResult.IsFailure)
