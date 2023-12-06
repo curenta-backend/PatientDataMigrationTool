@@ -6,6 +6,7 @@ using Domain.Interfaces.ExternalClients;
 using Domain.ValueObjects;
 using Infrastructure.DB;
 using MassTransit.Testing.Implementations;
+using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
@@ -59,7 +60,7 @@ namespace PatientDataMigrationTool
                 }
 
                 int numOfMigratedPatients = 0;
-                int numOfPatientsProcessed= 0;
+                int numOfPatientsProcessed = 0;
                 var failures = new List<KeyValuePair<string, long>>();
 
                 while (true)
@@ -73,15 +74,33 @@ namespace PatientDataMigrationTool
                         tryCount++;
                     }
 
+                    if (patientMedicationIdsMapping.Count >= 1000 || (patientMedicationIdsMapping.Any() && patientsResult.IsFailure) ||
+                        (!patientsResult.IsFailure && patientsResult.Value.Patients.Count == 0))
+                    {
+                        GenerateSqlScript(patientMedicationIdsMapping, "patientMedicationIdMapping");
+                        await Console.Out.WriteLineAsync($"inserted {patientMedicationIdsMapping.Count} patient ");
+                        patientMedicationIdsMapping.Clear();
+
+                    }
+
+                    if (adminHoursIdsMapping.Count >= 1000 || (adminHoursIdsMapping.Any() && patientsResult.IsFailure) ||
+                       (!patientsResult.IsFailure && patientsResult.Value.Patients.Count == 0))
+                    {
+                        GenerateSqlScript(adminHoursIdsMapping, "adminHoursIdMapping");
+                        await Console.Out.WriteLineAsync($"inserted  {adminHoursIdsMapping.Count} adminHours ");
+                        adminHoursIdsMapping.Clear();
+                    }
+
                     if (tryCount >= 3)
                     {
-                        Console.Write($"reading this page {pageNumber} failed for 4 times  and handled {pageSize * (pageNumber-1)} do you need to stop migration press y ");
-                        var input =  Console.ReadLine();
+                        Console.Write($"reading this page {pageNumber} failed for 4 times  and handled {pageSize * (pageNumber - 1)} do you need to stop migration press y ");
+                        var input = Console.ReadLine();
                         if (input == "y")
                         {
                             break;
                         }
                     }
+
                     if (!patientsResult.IsFailure)
                     {
                         var patients = patientsResult.Value.Patients;
@@ -126,7 +145,7 @@ namespace PatientDataMigrationTool
                         }
 
                         pageNumber++; // Move to the next page
-                    } 
+                    }
                 }
 
                 await Console.Out.WriteLineAsync($"** {numOfPatientsProcessed} patients processed : {numOfMigratedPatients} patients migrated successfully, {failures.Count} patients failed with the following reasons **");
@@ -135,18 +154,23 @@ namespace PatientDataMigrationTool
                 foreach (var failureReason in failureReasons)
                     await Console.Out.WriteLineAsync($"Reason : {failureReason.Reason}, Count : {failureReason.Count}, PatientIds : {failureReason.PatientIds}");
 
-                //print patient medication ids mapping
-                await Console.Out.WriteLineAsync($"** Patient Medication Ids Mapping **");
 
-                foreach (var patientMedicationIdMapping in patientMedicationIdsMapping)
-                    await Console.Out.WriteLineAsync($"{patientMedicationIdMapping.Key},{patientMedicationIdMapping.Value}");
+                int reuredExternalID = 0;
+                int takenPage = 1;
+                while (reuredExternalID > 400 || (takenPage == 1 && reuredExternalID == 0))
+                {
+                    var result = _newPatientDbContext.Patients.Select(p => new { p.Id, p.ExternalIds }).Skip(takenPage * 500)
+                        .Take(500).AsNoTracking().ToList();
+                    Dictionary<Guid, long> data = new Dictionary<Guid, long>();
+                    foreach (var patient in result)
+                    {
+                        data.Add(patient.Id, long.Parse(patient.ExternalIds.FirstOrDefault().Id));
+                    }
+                    GenerateExternalIdMappingSqlScript(data, "ordersript");
+                    reuredExternalID = result.Count();
+                    takenPage++;
+                }
 
-                GenerateSqlScript(patientMedicationIdsMapping, "patientMedicationIdMapping");
-                //print admin hours ids mapping
-                await Console.Out.WriteLineAsync($"** Admin Hours Ids Mapping **");
-                foreach (var adminHoursIdMapping in adminHoursIdsMapping)
-                    await Console.Out.WriteLineAsync($"{adminHoursIdMapping.Key},{adminHoursIdMapping.Value}");
-                GenerateSqlScript(patientMedicationIdsMapping, "adminHoursIdMapping");
             }
             catch (Exception e)
             {
@@ -154,9 +178,9 @@ namespace PatientDataMigrationTool
             }
         }
 
-        private void GenerateSqlScript(Dictionary<long, Guid>  data ,string fileName)
+        private void GenerateSqlScript(Dictionary<long, Guid> data, string fileName)
         {
-            string directory = "."; // Current directory. Change as needed.
+            string directory = ".";
             string extension = ".txt";
             int fileNumber = 1;
 
@@ -175,10 +199,16 @@ namespace PatientDataMigrationTool
                 using (var writer = new StreamWriter(filePath))
                 {
                     Console.WriteLine($"Created file: {filePath}");
-
-                    string createTable = "BEGIN TRANSACTION;\r\n--BEGIN TRY\r\n​\r\n--Create patient mapping temp table and feed it with data\r\nCREATE TABLE PatientIdsMapping (\r\n\tPatientId bigint NULL,\r\n\tPatientGUID uniqueidentifier NULL\r\n);\r\n​\r\nINSERT INTO PatientIdsMapping (PatientId,PatientGUID) VALUES";
-
-                    writer.WriteLine(createTable);
+                    string QslSCript = "";
+                    if (filePath == $"{fileName}{1}")
+                    {
+                        QslSCript = "BEGIN TRANSACTION;\r\n--BEGIN TRY\r\n​\r\n--Create patient mapping temp table and feed it with data\r\nCREATE TABLE PatientIdsMapping (\r\n\tPatientId bigint NULL,\r\n\tPatientGUID uniqueidentifier NULL\r\n);\r\n​\r\nINSERT INTO PatientIdsMapping (PatientId,PatientGUID) VALUES";
+                    }
+                    else
+                    {
+                        QslSCript = "INSERT INTO PatientIdsMapping(PatientId, PatientGUID) VALUES";
+                    }
+                    writer.WriteLine(QslSCript);
 
                     foreach (var item in data)
                     {
@@ -187,7 +217,55 @@ namespace PatientDataMigrationTool
 
                     writer.WriteLine("COMMIT;"); // Optionally, commit the transaction
                 }
-                
+
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"An error occurred: {ex.Message}");
+            }
+        }
+
+
+        private void GenerateExternalIdMappingSqlScript(Dictionary<Guid, long> data, string fileName)
+        {
+            string directory = ".";
+            string extension = ".txt";
+            int fileNumber = 1;
+
+
+            string filePath = Path.Combine(directory, fileName + fileNumber + extension);
+
+            while (File.Exists(filePath))
+            {
+                fileNumber++;
+                filePath = Path.Combine(directory, fileName + fileNumber + extension);
+            }
+
+            // Create the file
+            try
+            {
+                using (var writer = new StreamWriter(filePath))
+                {
+                    Console.WriteLine($"Created file: {filePath}");
+                    string QslSCript = "";
+                    if (fileNumber == 1)
+                    {
+                        QslSCript = "BEGIN TRANSACTION;\r\n--BEGIN TRY\r\n\r\n--Create patient mapping temp table and feed it with data\r\nCREATE TABLE PatientIdsMapping (\r\n\tPatientId bigint NULL,\r\n\tPatientGUID uniqueidentifier NULL\r\n);\r\n\r\nINSERT INTO PatientIdsMapping (PatientId,PatientGUID) VALUES";
+                    }
+                    else
+                    {
+                        QslSCript = "INSERT INTO PatientIdsMapping (PatientId,PatientGUID) VALUES";
+                    }
+
+                    foreach (var item in data)
+                    {
+                        writer.WriteLine($"('{item.Value}','{item.Key}'),");
+                    }
+
+                    if (data.Count == 0)
+                        writer.WriteLine("COMMIT;");
+                }
+
             }
             catch (Exception ex)
             {
@@ -203,7 +281,7 @@ namespace PatientDataMigrationTool
 
                 //patient basic data with addresses and place of service
                 var gender = Gender.Unknown;
-                if (!string.IsNullOrWhiteSpace(patient.Gender))                    
+                if (!string.IsNullOrWhiteSpace(patient.Gender))
                 {
                     try
                     {
@@ -211,7 +289,7 @@ namespace PatientDataMigrationTool
 
                         if (!isValidGender)
                         {
-                            gender = Gender.Unknown; 
+                            gender = Gender.Unknown;
                         }
                     }
                     catch (Exception)
@@ -283,7 +361,7 @@ namespace PatientDataMigrationTool
 
                 if ((patient.FacilityIdRef == null || patient.FacilityIdRef == 0) && patient.Facility == null)
                 {
-                    var createPtientResult = await Domain.Entities.Patient.CreateRetailPatient(_checkPatientExistService,basicInfoResult.Value, addressess, patientStatus);
+                    var createPtientResult = await Domain.Entities.Patient.CreateRetailPatient(_checkPatientExistService, basicInfoResult.Value, addressess, patientStatus);
                     if (createPtientResult.IsFailure)
                         throw new Exception(createPtientResult.Error);
                     newPatient = createPtientResult.Value;
@@ -369,7 +447,7 @@ namespace PatientDataMigrationTool
                 }
 
                 //medications
-                if(patientMedications != null)
+                if (patientMedications != null)
                 {
                     foreach (var medication in patientMedications)
                     {
@@ -393,7 +471,7 @@ namespace PatientDataMigrationTool
                             throw new Exception(medicalInfoResult.Error);
 
                         var rxInfoResult = PatientMedicationRXInfo.Create(
-                                (!string.IsNullOrEmpty( medication.Directions) ? medication.Directions : (!string.IsNullOrEmpty(medication.Frequency) ? medication.Frequency : " " )),
+                                (!string.IsNullOrEmpty(medication.Directions) ? medication.Directions : (!string.IsNullOrEmpty(medication.Frequency) ? medication.Frequency : " ")),
                                 (!string.IsNullOrEmpty(medication.Frequency) ? medication.Frequency : " "),
                                 null,
                                 medication.Route,
@@ -438,7 +516,7 @@ namespace PatientDataMigrationTool
                                 if (Enum.IsDefined(typeof(Domain.Enums.EnumsCollection.EMedicationBillingType), medication.Payer))
                                     billingType = (Domain.Enums.EnumsCollection.EMedicationBillingType)Enum.Parse(typeof(Domain.Enums.EnumsCollection.EMedicationBillingType), medication.Payer);
                         }
-                        catch 
+                        catch
                         {
                         }
 
@@ -450,7 +528,7 @@ namespace PatientDataMigrationTool
 
                         if (medication.PatientMedicationStatusId == (int)EPatientMedicationStatus.OnHold)
                         {
-                            var changeStatusResult = newMediation.ChangeStatusForMigration(Domain.Enums.EnumsCollection.EPatientMedicationStatus.OnHold, !string.IsNullOrEmpty( medication.DiscontinuationReason) ? medication.DiscontinuationReason : " ", newPatient);
+                            var changeStatusResult = newMediation.ChangeStatusForMigration(Domain.Enums.EnumsCollection.EPatientMedicationStatus.OnHold, !string.IsNullOrEmpty(medication.DiscontinuationReason) ? medication.DiscontinuationReason : " ", newPatient);
                             if (changeStatusResult.IsFailure)
                                 throw new Exception(changeStatusResult.Error);
                         }
